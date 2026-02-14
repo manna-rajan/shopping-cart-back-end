@@ -16,8 +16,7 @@ var app = express()
 app.use(cors())
 app.use(express.json())
 
-const mongoURI =
-  "mongodb+srv://manna:manna@cluster0.lqqm8gv.mongodb.net/shopping-app?retryWrites=true&w=majority&appName=Cluster0";
+const mongoURI = process.env.MONGO_URI;
 
 mongoose.connect(mongoURI).then(() => console.log("MongoDB connected"))
   .catch((err) => console.log(err));
@@ -95,7 +94,7 @@ app.post("/orders", async (req, res) => {
                 // This is a critical issue: payment is made but stock is unavailable.
                 // You should implement a refund mechanism here.
                 console.error(`Stock issue for product ${item.productId} after payment. Order ${cashfreeOrderId}`);
-                return res.status(400).json({ message: `Not enough stock for ${product.name}. Please contact support for a refund.` });
+                return res.json({ status: "error", message: `Not enough stock for ${product.name}. Please contact support for a refund.` });
             }
         }
 
@@ -117,13 +116,13 @@ app.post("/orders", async (req, res) => {
         // 5. Clear the customer's cart
         await customerModel.findByIdAndUpdate(customerId, { $set: { cart: [] } });
 
-        return res.status(201).json(savedOrder);
+        return res.json(savedOrder);
     } else {
-        return res.status(400).json({ message: 'Payment verification failed.' });
+        return res.json({ status: "error", message: 'Payment verification failed.' });
     }
   } catch (error) {
     console.error("Error in /orders:", error.response ? error.response.data : error.message);
-    res.status(500).json({ message: "Failed to create order", error: error.message });
+    res.json({ status: "error", message: "Failed to create order", error: error.message });
   }
 });
 
@@ -132,7 +131,7 @@ app.post("/seller/signup", async (req, res) => {
     const { name, email, password } = req.body;
     const existingSeller = await sellerModel.findOne({ email });
     if (existingSeller) {
-      return res.json({ status: "used email" });
+      return res.json({ status: "error", message: "Email is already in use." });
     }
     const hashedPassword = await hashPassword(password);
     const seller = new sellerModel({ name, email, password: hashedPassword });
@@ -149,15 +148,16 @@ app.post("/seller/signin", async (req, res) => {
     const { email, password } = req.body;
     const seller = await sellerModel.findOne({ email });
     if (!seller) {
-      return res.json({ status: "invalid" });
+      return res.json({ status: "error", message: "Invalid credentials." });
     }
     const isMatch = await bcrypt.compare(password, seller.password);
-    if (!isMatch) {
-      return res.json({ status: "failed" });
+    if (isMatch) {
+      res.json({ status: "success", sellerId: seller._id, sellerName: seller.name });
+    } else {
+      res.json({ status: "error", message: "Invalid credentials." });
     }
-    res.json({ status: "success", sellerId: seller._id, sellerName: seller.name });
   } catch (error) {
-    res.json({ error: error.message });
+    res.json({ status: "error", message: "An unexpected error occurred." });
   }
 });
 app.post("/customer/signup", async (req, res) => {
@@ -165,14 +165,14 @@ app.post("/customer/signup", async (req, res) => {
     const { name, email, password } = req.body;
     const existingCustomer = await customerModel.findOne({ email });
     if (existingCustomer) {
-      return res.status(409).json({ status: "error", message: "Email is already in use." });
+      return res.json({ status: "error", message: "Email is already in use." });
     }
     const hashedPassword = await hashPassword(password);
     const customer = new customerModel({ name, email, password: hashedPassword, phone: req.body.phone || '' });
     await customer.save();
-    res.status(201).json({ status: "success" });
+    res.json({ status: "success" });
   } catch (e) {
-    res.status(500).json({ status: "error", message: "An unexpected error occurred." });
+    res.json({ status: "error", message: "An unexpected error occurred." });
   }
 });
 app.post("/customer/signin", async (req, res) => {
@@ -180,16 +180,16 @@ app.post("/customer/signin", async (req, res) => {
     const { email, password } = req.body;
     const customer = await customerModel.findOne({ email });
     if (!customer) {
-      return res.status(401).json({ status: "error", message: "Invalid credentials." });
+      return res.json({ status: "error", message: "Invalid credentials." });
     }
     const isMatch = await bcrypt.compare(password, customer.password);
     if (isMatch) {
       return res.json({ status: "success", customerId: customer._id, name: customer.name });
     } else {
-      return res.status(401).json({ status: "error", message: "Invalid credentials." });
+      return res.json({ status: "error", message: "Invalid credentials." });
     }
   } catch (e) {
-    res.status(500).json({ status: "error", message: "An unexpected error occurred." });
+    res.json({ status: "error", message: "An unexpected error occurred." });
   }
 });
 
@@ -198,12 +198,12 @@ app.post('/customer/create-payment-session', async (req, res) => {
         const { customerId, totalAmount } = req.body;
 
         if (!customerId || !totalAmount || totalAmount <= 0) {
-            return res.status(400).json({ message: 'Customer ID and a valid total amount are required.' });
+            return res.json({ status: "error", message: 'Customer ID and a valid total amount are required.' });
         }
 
         const customer = await customerModel.findById(customerId);
         if (!customer) {
-            return res.status(404).json({ message: 'Customer not found.' });
+            return res.json({ status: "error", message: 'Customer not found.' });
         }
 
         const uniqueOrderId = `order_${uuidv4()}`;
@@ -231,10 +231,10 @@ app.post('/customer/create-payment-session', async (req, res) => {
 
         const response = await axios.post('https://sandbox.cashfree.com/pg/orders', requestData, { headers });
 
-        res.status(200).json({ payment_session_id: response.data.payment_session_id });
+        res.json({ payment_session_id: response.data.payment_session_id });
     } catch (error) {
         console.error("Error creating payment session:", error.response ? error.response.data : error.message);
-        res.status(500).json({ message: 'Failed to create payment session.' });
+        res.json({ status: "error", message: 'Failed to create payment session.' });
     }
 });
 
@@ -244,7 +244,7 @@ app.post("/seller/addproduct", async (req, res) => {
     await product.save();
     res.json({ status: "success", productId: product._id });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.json({ status: "error", message: e.message });
   }
 });
 app.post("/customer/viewcart", async (req, res) => {
@@ -252,11 +252,11 @@ app.post("/customer/viewcart", async (req, res) => {
     const { customerId } = req.body;
     const customer = await customerModel.findById(customerId).populate('cart.productId');
     if (!customer) {
-      return res.status(404).json({ message: "Customer not found" });
+      return res.json({ status: "error", message: "Customer not found" });
     }
     res.json(customer.cart);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.json({ status: "error", message: e.message });
   }
 });
 app.post("/allproducts", async (req, res) => {
@@ -264,7 +264,7 @@ app.post("/allproducts", async (req, res) => {
     const products = await productModel.find();
     res.json(products);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.json({ status: "error", message: e.message });
   }
 });
 app.post("/customer/addtocart", async (req, res) => {
@@ -272,7 +272,7 @@ app.post("/customer/addtocart", async (req, res) => {
     const { customerId, productId } = req.body;
     const customer = await customerModel.findById(customerId);
     if (!customer) {
-      return res.status(404).json({ message: "Customer not found" });
+      return res.json({ status: "error", message: "Customer not found" });
     }
     const product = await productModel.findById(productId);
     if (!product) {
@@ -284,13 +284,13 @@ app.post("/customer/addtocart", async (req, res) => {
     if (cartItem) {
       // Check if adding another item would exceed available stock
       if (product.quantity <= cartItem.quantity) {
-        return res.status(400).json({ message: `Not enough stock for ${product.name}. Only ${product.quantity} available.` });
+        return res.json({ status: "error", message: `Not enough stock for ${product.name}. Only ${product.quantity} available.` });
       }
       cartItem.quantity++;
     } else {
       // Check if product is in stock before adding it for the first time
       if (product.quantity < 1) {
-        return res.status(400).json({ message: "Product is out of stock." });
+        return res.json({ status: "error", message: "Product is out of stock." });
       }
       customer.cart.push({ productId, quantity: 1 });
     }
@@ -298,7 +298,7 @@ app.post("/customer/addtocart", async (req, res) => {
     await customer.save();
     res.json({ status: "success" });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.json({ status: "error", message: e.message });
   }
 });
 
@@ -307,12 +307,12 @@ app.post("/seller/removeproduct", async (req, res) => {
     const { sellerId, productId } = req.body;
     const product = await productModel.findOne({ _id: productId, sellerId });
     if (!product) {
-      return res.status(404).json({ message: "Product not found or you do not have permission to delete this product." });
+      return res.json({ status: "error", message: "Product not found or you do not have permission to delete this product." });
     }
     await productModel.deleteOne({ _id: productId, sellerId });
     res.json({ status: "success", message: "Product deleted successfully." });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.json({ status: "error", message: e.message });
   }
 });
 
@@ -321,7 +321,7 @@ app.post("/customer/removefromcart", async (req, res) => {
     const { customerId, productId } = req.body;
     const customer = await customerModel.findById(customerId);
     if (!customer) {
-      return res.status(404).json({ message: "Customer not found" });
+      return res.json({ status: "error", message: "Customer not found" });
     }
 
     const cartItem = customer.cart.find(item => item.productId.toString() === productId);
@@ -330,10 +330,10 @@ app.post("/customer/removefromcart", async (req, res) => {
       await customer.save();
       res.json({ status: "success" });
     } else {
-      res.status(404).json({ message: "Item not in cart" });
+      res.json({ status: "error", message: "Item not in cart" });
     }
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.json({ status: "error", message: e.message });
   }
 });
 app.post("/seller/vieworders", async (req, res) => {
@@ -341,12 +341,11 @@ app.post("/seller/vieworders", async (req, res) => {
     const { sellerId } = req.body;
 
     if (!sellerId) {
-      return res.status(400).json({ message: "sellerId is required to view orders." });
+      return res.json({ status: "error", message: "sellerId is required to view orders." });
     }
 
     // Find all product IDs belonging to this seller
-    const sellerProducts = await productModel.find({ sellerId }).select('_id');
-    const sellerProductIds = sellerProducts.map(p => p._id);
+    const sellerProductIds = await productModel.find({ sellerId }).distinct('_id');
 
     // Find all orders that contain at least one product from this seller
     const orders = await orderModel.find({ 'items.productId': { $in: sellerProductIds } })
@@ -354,7 +353,7 @@ app.post("/seller/vieworders", async (req, res) => {
       .populate('customerId', 'name email'); // Populate only necessary customer fields
     res.json(orders);
   } catch (error) {
-    res.status(500).json({ message: "Failed to retrieve orders", error: error.message });
+    res.json({ status: "error", message: "Failed to retrieve orders", error: error.message });
   }
 });
 app.post("/customer/vieworders", async (req, res) => {
@@ -368,7 +367,7 @@ app.post("/customer/vieworders", async (req, res) => {
       res.json({ message: "No orders found for this customer." });
     }
   } catch (error) {
-    res.status(500).json({ message: "Failed to retrieve orders", error: error.message });
+    res.json({ status: "error", message: "Failed to retrieve orders", error: error.message });
   }
 });
 
@@ -381,7 +380,7 @@ app.post("/searchproducts", async (req, res) => {
     const products = await productModel.find({ name: { $regex: name.trim(), $options: 'i' } });
     res.json(products);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.json({ status: "error", message: e.message });
   }
 });
 
