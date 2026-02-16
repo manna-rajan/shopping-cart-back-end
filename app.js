@@ -16,7 +16,7 @@ var app = express()
 app.use(cors())
 app.use(express.json())
 
-const mongoURI = process.env.MONGO_URI;
+const mongoURI = process.env.MONGO_URI
 
 mongoose.connect(mongoURI).then(() => console.log("MongoDB connected"))
   .catch((err) => console.log(err));
@@ -36,7 +36,7 @@ const customerSchema = mongoose.Schema({
   phone: { type: String, trim: true }, // Added for Cashfree integration
   cart: [{
     productId: { type: mongoose.Schema.Types.ObjectId, ref: 'product', required: true },
-    quantity: { type: Number, min: 1, default: 1 , required: true }
+    quantity: { type: Number, min: 1, default: 1, required: true }
   }]
 }
 )
@@ -49,7 +49,7 @@ const productSchema = mongoose.Schema({
   quantity: { type: Number, required: true },
   sellerId: { type: mongoose.Schema.Types.ObjectId, ref: 'seller', required: true },
   sellerName: { type: String, required: true },
-  link: { type: String } 
+  link: { type: String }
 })
 
 const productModel = mongoose.model("product", productSchema)
@@ -73,56 +73,56 @@ app.post("/orders", async (req, res) => {
 
     // 1. Verify the payment with Cashfree
     const headers = {
-        'x-api-version': '2022-09-01',
-        'x-client-id': process.env.CASHFREE_APP_ID,
-        'x-client-secret': process.env.CASHFREE_SECRET_KEY
+      'x-api-version': '2022-09-01',
+      'x-client-id': process.env.CASHFREE_APP_ID,
+      'x-client-secret': process.env.CASHFREE_SECRET_KEY
     };
 
     const verificationResponse = await axios.get(
-        `https://sandbox.cashfree.com/pg/orders/${cashfreeOrderId}`,
-        { headers }
+      `https://sandbox.cashfree.com/pg/orders/${cashfreeOrderId}`,
+      { headers }
     );
 
     const orderData = verificationResponse.data;
 
     // 2. Check if payment is successful and amount matches
     if (orderData.order_status === 'PAID' && orderData.order_amount === totalAmount) {
-        // Check stock availability before saving the order
-        for (const item of items) {
-            const product = await productModel.findById(item.productId);
-            if (!product || product.quantity < item.quantity) {
-                // This is a critical issue: payment is made but stock is unavailable.
-                // You should implement a refund mechanism here.
-                console.error(`Stock issue for product ${item.productId} after payment. Order ${cashfreeOrderId}`);
-                return res.json({ status: "error", message: `Not enough stock for ${product.name}. Please contact support for a refund.` });
-            }
+      // Check stock availability before saving the order
+      for (const item of items) {
+        const product = await productModel.findById(item.productId);
+        if (!product || product.quantity < item.quantity) {
+          // This is a critical issue: payment is made but stock is unavailable.
+          // You should implement a refund mechanism here.
+          console.error(`Stock issue for product ${item.productId} after payment. Order ${cashfreeOrderId}`);
+          return res.status(400).json({ message: `Not enough stock for ${product.name}. Please contact support for a refund.` });
         }
+      }
 
-        // 3. Create and save the order
-        const newOrder = new orderModel({
-            _id: cashfreeOrderId,
-            customerId,
-            items,
-            totalAmount: orderData.order_amount,
-            paymentStatus: 'Paid'
-        });
-        const savedOrder = await newOrder.save();
+      // 3. Create and save the order
+      const newOrder = new orderModel({
+        _id: cashfreeOrderId,
+        customerId,
+        items,
+        totalAmount: orderData.order_amount,
+        paymentStatus: 'Paid'
+      });
+      const savedOrder = await newOrder.save();
 
-        // 4. Decrease product stock
-        for (const item of items) {
-            await productModel.findByIdAndUpdate(item.productId, { $inc: { quantity: -item.quantity } });
-        }
+      // 4. Decrease product stock
+      for (const item of items) {
+        await productModel.findByIdAndUpdate(item.productId, { $inc: { quantity: -item.quantity } });
+      }
 
-        // 5. Clear the customer's cart
-        await customerModel.findByIdAndUpdate(customerId, { $set: { cart: [] } });
+      // 5. Clear the customer's cart
+      await customerModel.findByIdAndUpdate(customerId, { $set: { cart: [] } });
 
-        return res.json(savedOrder);
+      return res.status(201).json(savedOrder);
     } else {
-        return res.json({ status: "error", message: 'Payment verification failed.' });
+      return res.status(400).json({ message: 'Payment verification failed.' });
     }
   } catch (error) {
     console.error("Error in /orders:", error.response ? error.response.data : error.message);
-    res.json({ status: "error", message: "Failed to create order", error: error.message });
+    res.status(500).json({ message: "Failed to create order", error: error.message });
   }
 });
 
@@ -138,8 +138,7 @@ app.post("/seller/signup", async (req, res) => {
     await seller.save();
     res.json({ status: "success" });
   } catch (e) {
-    console.log(e);
-    res.json({ status: "error", message: e.message });
+    res.json({ status: "error", message: "An unexpected error occurred." });
   }
 });
 
@@ -148,16 +147,15 @@ app.post("/seller/signin", async (req, res) => {
     const { email, password } = req.body;
     const seller = await sellerModel.findOne({ email });
     if (!seller) {
-      return res.json({ status: "error", message: "Invalid credentials." });
+      return res.json({ status: "error", message: "Invalid credentials" });
     }
     const isMatch = await bcrypt.compare(password, seller.password);
-    if (isMatch) {
-      res.json({ status: "success", sellerId: seller._id, sellerName: seller.name });
-    } else {
-      res.json({ status: "error", message: "Invalid credentials." });
+    if (!isMatch) {
+      return res.json({ status: "error", message: "Invalid credentials" });
     }
+    res.json({ status: "success", sellerId: seller._id, sellerName: seller.name });
   } catch (error) {
-    res.json({ status: "error", message: "An unexpected error occurred." });
+    res.json({ status: "error", message: error.message });
   }
 });
 app.post("/customer/signup", async (req, res) => {
@@ -194,55 +192,60 @@ app.post("/customer/signin", async (req, res) => {
 });
 
 app.post('/customer/create-payment-session', async (req, res) => {
-    try {
-        const { customerId, totalAmount } = req.body;
+  try {
+    const { customerId, totalAmount } = req.body;
 
-        if (!customerId || !totalAmount || totalAmount <= 0) {
-            return res.json({ status: "error", message: 'Customer ID and a valid total amount are required.' });
-        }
-
-        const customer = await customerModel.findById(customerId);
-        if (!customer) {
-            return res.json({ status: "error", message: 'Customer not found.' });
-        }
-
-        const uniqueOrderId = `order_${uuidv4()}`;
-
-        const requestData = {
-            order_id: uniqueOrderId,
-            order_amount: totalAmount,
-            order_currency: "INR",
-            customer_details: {
-                customer_id: customer._id.toString(),
-                customer_email: customer.email,
-                customer_phone: customer.phone || "9999999999", // Using phone from schema, with a fallback
-            },
-            order_meta: {
-                return_url: `http://localhost:3000/customer/vieworders?order_id={order_id}`,
-            }
-        };
-
-        const headers = {
-            'Content-Type': 'application/json',
-            'x-api-version': '2022-09-01',
-            'x-client-id': process.env.CASHFREE_APP_ID,
-            'x-client-secret': process.env.CASHFREE_SECRET_KEY
-        };
-
-        const response = await axios.post('https://sandbox.cashfree.com/pg/orders', requestData, { headers });
-
-        res.json({ payment_session_id: response.data.payment_session_id });
-    } catch (error) {
-        console.error("Error creating payment session:", error.response ? error.response.data : error.message);
-        res.json({ status: "error", message: 'Failed to create payment session.' });
+    if (!customerId || !totalAmount || totalAmount <= 0) {
+      return res.status(400).json({ message: 'Customer ID and a valid total amount are required.' });
     }
+
+    const customer = await customerModel.findById(customerId);
+    if (!customer) {
+      return res.status(404).json({ message: 'Customer not found.' });
+    }
+
+    const uniqueOrderId = `order_${uuidv4()}`;
+
+    const requestData = {
+      order_id: uniqueOrderId,
+      order_amount: totalAmount,
+      order_currency: "INR",
+      customer_details: {
+        customer_id: customer._id.toString(),
+        customer_email: customer.email,
+        customer_phone: customer.phone || "9999999999", // Using phone from schema, with a fallback
+      },
+      order_meta: {
+        return_url: `http://localhost:3000/customer/vieworders?order_id={order_id}`,
+      }
+    };
+
+    const headers = {
+      'Content-Type': 'application/json',
+      'x-api-version': '2022-09-01',
+      'x-client-id': process.env.CASHFREE_APP_ID,
+      'x-client-secret': process.env.CASHFREE_SECRET_KEY
+    };
+
+    const response = await axios.post('https://sandbox.cashfree.com/pg/orders', requestData, { headers });
+
+    res.status(200).json({ payment_session_id: response.data.payment_session_id });
+  } catch (error) {
+    console.error("Error creating payment session:", error.response ? error.response.data : error.message);
+    res.status(500).json({ message: 'Failed to create payment session.' });
+  }
 });
 
 app.post("/seller/addproduct", async (req, res) => {
   try {
+    const { sellerId } = req.body;
+    const seller = await sellerModel.findById(sellerId);
+    if (!seller) {
+      return res.json({ status: "error", message: "Seller not found." });
+    }
     const product = new productModel(req.body);
     await product.save();
-    res.json({ status: "success", productId: product._id });
+    res.json({ status: "success", message: "Product added successfully." });
   } catch (e) {
     res.json({ status: "error", message: e.message });
   }
@@ -276,7 +279,7 @@ app.post("/customer/addtocart", async (req, res) => {
     }
     const product = await productModel.findById(productId);
     if (!product) {
-      return res.status(404).json({ message: "Product not found" });
+      return res.json({ status: "error", message: "Product not found" });
     }
 
     const cartItem = customer.cart.find(item => item.productId.toString() === productId);
@@ -345,7 +348,8 @@ app.post("/seller/vieworders", async (req, res) => {
     }
 
     // Find all product IDs belonging to this seller
-    const sellerProductIds = await productModel.find({ sellerId }).distinct('_id');
+    const sellerProducts = await productModel.find({ sellerId }).select('_id');
+    const sellerProductIds = sellerProducts.map(p => p._id);
 
     // Find all orders that contain at least one product from this seller
     const orders = await orderModel.find({ 'items.productId': { $in: sellerProductIds } })
