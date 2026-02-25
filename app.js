@@ -216,7 +216,7 @@ app.post('/customer/create-payment-session', async (req, res) => {
         customer_phone: customer.phone || "9999999999", // Using phone from schema, with a fallback
       },
       order_meta: {
-        return_url: `http://localhost:3000/customer/vieworders?order_id={order_id}`,
+        return_url: `http://34.231.116.119:3000/customer/vieworders?order_id={order_id}`,
       }
     };
 
