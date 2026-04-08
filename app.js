@@ -8,6 +8,9 @@ const { v4: uuidv4 } = require('uuid')
 // Load environment variables
 require('dotenv').config({ path: './shopping.env' });
 
+const dns = require('node:dns');
+dns.setServers(['8.8.8.8', '8.8.4.4']);
+
 const saltvalue = 10
 const hashPassword = async (password) => {
   return await bcrypt.hash(password, saltvalue)
