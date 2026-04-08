@@ -87,33 +87,35 @@ app.post("/orders", async (req, res) => {
 
     // 2. Check if payment is successful and amount matches
     if (orderData.order_status === 'PAID' && orderData.order_amount === totalAmount) {
-      // Check stock availability before saving the order
+      // 3. Atomically decrease product stock and check for availability in one step
       for (const item of items) {
-        const product = await productModel.findById(item.productId);
-        if (!product || product.quantity < item.quantity) {
-          // This is a critical issue: payment is made but stock is unavailable.
-          // You should implement a refund mechanism here.
-          console.error(`Stock issue for product ${item.productId} after payment. Order ${cashfreeOrderId}`);
-          return res.status(400).json({ message: `Not enough stock for ${product.name}. Please contact support for a refund.` });
+        const updatedProduct = await productModel.findOneAndUpdate(
+          { _id: item.productId, quantity: { $gte: item.quantity } }, // Condition: Find product only if stock is sufficient
+          { $inc: { quantity: -item.quantity } }, // Operation: Decrement stock
+          { new: false } // We don't need the new document returned
+        );
+
+        if (!updatedProduct) {
+          // This block runs if the findOneAndUpdate condition fails (not enough stock).
+          // This is a critical issue: payment is made but stock is unavailable. An automated refund is needed.
+          console.error(`Stock issue for product ${item.productId} after payment. Order ${cashfreeOrderId}. REFUND REQUIRED.`);
+          // TODO: Implement automated refund logic with Cashfree's API.
+          // For now, inform the user and prevent order creation.
+          return res.status(409).json({ message: `Not enough stock for an item in your order. Please contact support with order ID ${cashfreeOrderId} for a refund.` });
         }
       }
 
-      // 3. Create and save the order
+      // 4. If all stock updates were successful, create and save the order
       const newOrder = new orderModel({
         _id: cashfreeOrderId,
         customerId,
         items,
         totalAmount: orderData.order_amount,
-        paymentStatus: 'Paid'
+        paymentStatus: 'Paid',
       });
       const savedOrder = await newOrder.save();
 
-      // 4. Decrease product stock
-      for (const item of items) {
-        await productModel.findByIdAndUpdate(item.productId, { $inc: { quantity: -item.quantity } });
-      }
-
-      // 5. Clear the customer's cart
+      // 5. Clear the customer's cart now that the order is successfully saved
       await customerModel.findByIdAndUpdate(customerId, { $set: { cart: [] } });
 
       return res.status(201).json(savedOrder);
@@ -216,7 +218,7 @@ app.post('/customer/create-payment-session', async (req, res) => {
         customer_phone: customer.phone || "9999999999", // Using phone from schema, with a fallback
       },
       order_meta: {
-        return_url: `http://34.231.116.119:3000/customer/vieworders?order_id={order_id}`,
+        return_url: `${process.env.FRONTEND_URL}/customer/vieworders?order_id={order_id}`,
       }
     };
 
@@ -388,6 +390,6 @@ app.post("/searchproducts", async (req, res) => {
   }
 });
 
-app.listen(3001, () => {
-  console.log("Server started on port 3001");
+app.listen(process.env.PORT || 3001, () => {
+  console.log(`Server started on port ${process.env.PORT || 3001}`);
 });
