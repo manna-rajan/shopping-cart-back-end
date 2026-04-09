@@ -137,16 +137,20 @@ app.post("/orders", async (req, res) => {
 app.post("/seller/signup", async (req, res) => {
   try {
     const { name, email, password } = req.body;
+    if (!name || !email || !password) {
+      return res.status(400).json({ message: "Name, email, and password are required." });
+    }
     const existingSeller = await sellerModel.findOne({ email });
     if (existingSeller) {
-      return res.json({ status: "error", message: "Email is already in use." });
+      return res.status(409).json({ message: "Email is already in use." });
     }
     const hashedPassword = await hashPassword(password);
     const seller = new sellerModel({ name, email, password: hashedPassword });
     await seller.save();
-    res.json({ status: "success" });
+    res.status(201).json({ status: "success", message: "Seller created successfully." });
   } catch (e) {
-    res.json({ status: "error", message: "An unexpected error occurred." });
+    console.error("Seller signup error:", e);
+    res.status(500).json({ message: "An unexpected error occurred." });
   }
 });
 
@@ -155,30 +159,35 @@ app.post("/seller/signin", async (req, res) => {
     const { email, password } = req.body;
     const seller = await sellerModel.findOne({ email });
     if (!seller) {
-      return res.json({ status: "error", message: "Invalid credentials" });
+      return res.status(401).json({ message: "Invalid credentials" });
     }
     const isMatch = await bcrypt.compare(password, seller.password);
     if (!isMatch) {
-      return res.json({ status: "error", message: "Invalid credentials" });
+      return res.status(401).json({ message: "Invalid credentials" });
     }
-    res.json({ status: "success", sellerId: seller._id, sellerName: seller.name });
+    res.status(200).json({ status: "success", sellerId: seller._id, sellerName: seller.name });
   } catch (error) {
-    res.json({ status: "error", message: error.message });
+    console.error("Seller signin error:", error);
+    res.status(500).json({ message: "An unexpected error occurred." });
   }
 });
 app.post("/customer/signup", async (req, res) => {
   try {
     const { name, email, password } = req.body;
+    if (!name || !email || !password) {
+      return res.status(400).json({ message: "Name, email, and password are required." });
+    }
     const existingCustomer = await customerModel.findOne({ email });
     if (existingCustomer) {
-      return res.json({ status: "error", message: "Email is already in use." });
+      return res.status(409).json({ message: "Email is already in use." });
     }
     const hashedPassword = await hashPassword(password);
     const customer = new customerModel({ name, email, password: hashedPassword, phone: req.body.phone || '' });
     await customer.save();
-    res.json({ status: "success" });
+    res.status(201).json({ status: "success", message: "Customer created successfully." });
   } catch (e) {
-    res.json({ status: "error", message: "An unexpected error occurred." });
+    console.error("Customer signup error:", e);
+    res.status(500).json({ message: "An unexpected error occurred." });
   }
 });
 app.post("/customer/signin", async (req, res) => {
@@ -186,16 +195,17 @@ app.post("/customer/signin", async (req, res) => {
     const { email, password } = req.body;
     const customer = await customerModel.findOne({ email });
     if (!customer) {
-      return res.json({ status: "error", message: "Invalid credentials." });
+      return res.status(401).json({ message: "Invalid credentials." });
     }
     const isMatch = await bcrypt.compare(password, customer.password);
     if (isMatch) {
-      return res.json({ status: "success", customerId: customer._id, name: customer.name });
+      return res.status(200).json({ status: "success", customerId: customer._id, name: customer.name });
     } else {
-      return res.json({ status: "error", message: "Invalid credentials." });
+      return res.status(401).json({ message: "Invalid credentials." });
     }
   } catch (e) {
-    res.json({ status: "error", message: "An unexpected error occurred." });
+    console.error("Customer signin error:", e);
+    res.status(500).json({ message: "An unexpected error occurred." });
   }
 });
 
@@ -247,27 +257,43 @@ app.post('/customer/create-payment-session', async (req, res) => {
 app.post("/seller/addproduct", async (req, res) => {
   try {
     const { sellerId } = req.body;
+
+    // Check if sellerId is provided and is a valid MongoDB ObjectId
+    if (!sellerId || !mongoose.Types.ObjectId.isValid(sellerId)) {
+      return res.status(401).json({ message: "Unauthorized: A valid seller ID is required." });
+    }
+
     const seller = await sellerModel.findById(sellerId);
     if (!seller) {
-      return res.json({ status: "error", message: "Seller not found." });
+      return res.status(404).json({ message: "Seller not found." });
     }
+
     const product = new productModel(req.body);
     await product.save();
-    res.json({ status: "success", message: "Product added successfully." });
+    res.status(201).json({ status: "success", message: "Product added successfully." });
   } catch (e) {
-    res.json({ status: "error", message: e.message });
+    console.error("Add product error:", e);
+    res.status(500).json({ message: "An unexpected error occurred." });
   }
 });
 app.post("/customer/viewcart", async (req, res) => {
   try {
     const { customerId } = req.body;
+
+    // Check if customerId is provided and is a valid MongoDB ObjectId
+    if (!customerId || !mongoose.Types.ObjectId.isValid(customerId)) {
+      return res.status(400).json({ message: "A valid customer ID is required." });
+    }
+
     const customer = await customerModel.findById(customerId).populate('cart.productId');
     if (!customer) {
-      return res.json({ status: "error", message: "Customer not found" });
+      return res.status(404).json({ message: "Customer not found" });
     }
+
     res.json(customer.cart);
   } catch (e) {
-    res.json({ status: "error", message: e.message });
+    console.error("View cart error:", e);
+    res.status(500).json({ message: "An unexpected error occurred." });
   }
 });
 app.post("/allproducts", async (req, res) => {
@@ -275,19 +301,26 @@ app.post("/allproducts", async (req, res) => {
     const products = await productModel.find();
     res.json(products);
   } catch (e) {
-    res.json({ status: "error", message: e.message });
+    console.error("All products error:", e);
+    res.status(500).json({ message: "An unexpected error occurred." });
   }
 });
 app.post("/customer/addtocart", async (req, res) => {
   try {
     const { customerId, productId } = req.body;
+
+    // Check if customerId is provided and is a valid MongoDB ObjectId
+    if (!customerId || !mongoose.Types.ObjectId.isValid(customerId)) {
+      return res.status(400).json({ message: "A valid customer ID is required." });
+    }
+
     const customer = await customerModel.findById(customerId);
     if (!customer) {
-      return res.json({ status: "error", message: "Customer not found" });
+      return res.status(404).json({ message: "Customer not found" });
     }
     const product = await productModel.findById(productId);
     if (!product) {
-      return res.json({ status: "error", message: "Product not found" });
+      return res.status(404).json({ message: "Product not found" });
     }
 
     const cartItem = customer.cart.find(item => item.productId.toString() === productId);
@@ -295,13 +328,13 @@ app.post("/customer/addtocart", async (req, res) => {
     if (cartItem) {
       // Check if adding another item would exceed available stock
       if (product.quantity <= cartItem.quantity) {
-        return res.json({ status: "error", message: `Not enough stock for ${product.name}. Only ${product.quantity} available.` });
+        return res.status(400).json({ message: `Not enough stock for ${product.name}. Only ${product.quantity} available.` });
       }
       cartItem.quantity++;
     } else {
       // Check if product is in stock before adding it for the first time
       if (product.quantity < 1) {
-        return res.json({ status: "error", message: "Product is out of stock." });
+        return res.status(400).json({ message: "Product is out of stock." });
       }
       customer.cart.push({ productId, quantity: 1 });
     }
@@ -309,30 +342,44 @@ app.post("/customer/addtocart", async (req, res) => {
     await customer.save();
     res.json({ status: "success" });
   } catch (e) {
-    res.json({ status: "error", message: e.message });
+    console.error("Add to cart error:", e);
+    res.status(500).json({ message: "An unexpected error occurred." });
   }
 });
 
 app.post("/seller/removeproduct", async (req, res) => {
   try {
     const { sellerId, productId } = req.body;
+
+    // Check if sellerId is provided and is a valid MongoDB ObjectId
+    if (!sellerId || !mongoose.Types.ObjectId.isValid(sellerId)) {
+      return res.status(401).json({ message: "Unauthorized: A valid seller ID is required." });
+    }
+
     const product = await productModel.findOne({ _id: productId, sellerId });
     if (!product) {
-      return res.json({ status: "error", message: "Product not found or you do not have permission to delete this product." });
+      return res.status(404).json({ message: "Product not found or you do not have permission to delete this product." });
     }
     await productModel.deleteOne({ _id: productId, sellerId });
     res.json({ status: "success", message: "Product deleted successfully." });
   } catch (e) {
-    res.json({ status: "error", message: e.message });
+    console.error("Remove product error:", e);
+    res.status(500).json({ message: "An unexpected error occurred." });
   }
 });
 
 app.post("/customer/removefromcart", async (req, res) => {
   try {
     const { customerId, productId } = req.body;
+
+    // Check if customerId is provided and is a valid MongoDB ObjectId
+    if (!customerId || !mongoose.Types.ObjectId.isValid(customerId)) {
+      return res.status(400).json({ message: "A valid customer ID is required." });
+    }
+
     const customer = await customerModel.findById(customerId);
     if (!customer) {
-      return res.json({ status: "error", message: "Customer not found" });
+      return res.status(404).json({ message: "Customer not found" });
     }
 
     const cartItem = customer.cart.find(item => item.productId.toString() === productId);
@@ -341,18 +388,25 @@ app.post("/customer/removefromcart", async (req, res) => {
       await customer.save();
       res.json({ status: "success" });
     } else {
-      res.json({ status: "error", message: "Item not in cart" });
+      res.status(404).json({ message: "Item not in cart" });
     }
   } catch (e) {
-    res.json({ status: "error", message: e.message });
+    console.error("Remove from cart error:", e);
+    res.status(500).json({ message: "An unexpected error occurred." });
   }
 });
 app.post("/seller/vieworders", async (req, res) => {
   try {
     const { sellerId } = req.body;
 
-    if (!sellerId) {
-      return res.json({ status: "error", message: "sellerId is required to view orders." });
+    // Check if sellerId is provided and is a valid MongoDB ObjectId
+    if (!sellerId || !mongoose.Types.ObjectId.isValid(sellerId)) {
+      return res.status(401).json({ message: "Unauthorized: A valid seller ID is required." });
+    }
+
+    const seller = await sellerModel.findById(sellerId);
+    if (!seller) {
+      return res.status(404).json({ message: "Seller not found." });
     }
 
     // Find all product IDs belonging to this seller
@@ -365,21 +419,26 @@ app.post("/seller/vieworders", async (req, res) => {
       .populate('customerId', 'name email'); // Populate only necessary customer fields
     res.json(orders);
   } catch (error) {
-    res.json({ status: "error", message: "Failed to retrieve orders", error: error.message });
+    console.error("Seller view orders error:", error);
+    res.status(500).json({ message: "Failed to retrieve orders", error: error.message });
   }
 });
 app.post("/customer/vieworders", async (req, res) => {
   try {
     const { customerId } = req.body;
+
+    // Check if customerId is provided and is a valid MongoDB ObjectId
+    if (!customerId || !mongoose.Types.ObjectId.isValid(customerId)) {
+      return res.status(400).json({ message: "A valid customer ID is required." });
+    }
+
     const orders = await orderModel.find({ customerId }).populate('items.productId');
 
-    if (orders.length > 0) {
-      res.json(orders);
-    } else {
-      res.json({ message: "No orders found for this customer." });
-    }
+    res.json(orders);
+
   } catch (error) {
-    res.json({ status: "error", message: "Failed to retrieve orders", error: error.message });
+    console.error("Customer view orders error:", error);
+    res.status(500).json({ message: "Failed to retrieve orders", error: error.message });
   }
 });
 
@@ -392,7 +451,8 @@ app.post("/searchproducts", async (req, res) => {
     const products = await productModel.find({ name: { $regex: name.trim(), $options: 'i' } });
     res.json(products);
   } catch (e) {
-    res.json({ status: "error", message: e.message });
+    console.error("Search products error:", e);
+    res.status(500).json({ message: "An unexpected error occurred." });
   }
 });
 
